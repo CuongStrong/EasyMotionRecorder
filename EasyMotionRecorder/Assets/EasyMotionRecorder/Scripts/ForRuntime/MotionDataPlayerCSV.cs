@@ -13,44 +13,43 @@ using System.IO;
 namespace Entum
 {
     /// <summary>
-    /// CSVに吐かれたモーションデータを再生する
+    /// Play the motion data spit out in CSV
     /// </summary>
     public class MotionDataPlayerCSV : MotionDataPlayer
     {
-        [SerializeField, Tooltip("スラッシュで終わる形で")]
-        private string _recordedDirectory;
+        [SerializeField, Tooltip("Ending with a slash")]
+        private string recordedDirectory;
 
-        [SerializeField, Tooltip("拡張子も")]
-        private string _recordedFileName;
+        [SerializeField, Tooltip("Extension")]
+        private string recordedFileName;
 
         // Use this for initialization
         private void Start()
         {
-            if (string.IsNullOrEmpty(_recordedDirectory))
+            if (string.IsNullOrEmpty(recordedDirectory))
             {
-                _recordedDirectory = Application.streamingAssetsPath + "/";
+                recordedDirectory = Application.streamingAssetsPath + "/";
             }
 
-            string motionCSVPath = _recordedDirectory + _recordedFileName;
+            string motionCSVPath = recordedDirectory + recordedFileName;
             LoadCSVData(motionCSVPath);
         }
 
-        //CSVから_recordedMotionDataを作る
+        //Create recordedMotionData from CSV
         private void LoadCSVData(string motionDataPath)
         {
-            //ファイルが存在しなければ終了
+            //Exit if the file does not exist
             if (!File.Exists(motionDataPath))
             {
                 return;
             }
 
-
-            RecordedMotionData = ScriptableObject.CreateInstance<HumanoidPoses>();
+            recordedHumanoidPoses = ScriptableObject.CreateInstance<HumanoidPoses>();
 
             FileStream fs = null;
             StreamReader sr = null;
 
-            //ファイル読み込み
+            //File reading
             try
             {
                 fs = new FileStream(motionDataPath, FileMode.Open);
@@ -63,7 +62,7 @@ namespace Entum
                     if (line != "")
                     {
                         seriHumanPose.DeserializeCSV(line);
-                        RecordedMotionData.Poses.Add(seriHumanPose);
+                        recordedHumanoidPoses.serializeHumanoidPoses.Add(seriHumanPose);
                     }
                 }
                 sr.Close();
@@ -73,7 +72,7 @@ namespace Entum
             }
             catch (System.Exception e)
             {
-                Debug.LogError("ファイル読み込み失敗！" + e.Message + e.StackTrace);
+                Debug.LogError("File reading failed! " + e.Message + e.StackTrace);
             }
 
             if (sr != null)

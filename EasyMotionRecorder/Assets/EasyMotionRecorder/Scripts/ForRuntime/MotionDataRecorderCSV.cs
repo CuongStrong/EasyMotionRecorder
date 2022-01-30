@@ -14,25 +14,25 @@ using System.IO;
 namespace Entum
 {
     /// <summary>
-    /// モーションデータをCSVに記録するクラス
-    /// ランタイムでも記録できる
+    /// A class that records motion data in CSV
+    /// Can be recorded even at runtime
     /// </summary>
     [DefaultExecutionOrder(31000)]
     public class MotionDataRecorderCSV : MotionDataRecorder
     {
-        [SerializeField, Tooltip("スラッシュで終わる形で")]
-        private string _outputDirectory;
+        [SerializeField, Tooltip("Ending with a slash")]
+        private string outputDirectory;
 
-        [SerializeField, Tooltip("拡張子も")]
-        private string _outputFileName;
+        [SerializeField, Tooltip("Extension")]
+        private string outputFileName;
 
         protected override void WriteAnimationFile()
         {
-            //ファイルオープン
-            string directoryStr = _outputDirectory;
+            //File open
+            string directoryStr = outputDirectory;
             if (directoryStr == "")
             {
-                //自動設定ディレクトリ
+                //Auto-config directory
                 directoryStr = Application.streamingAssetsPath + "/";
 
                 if (!Directory.Exists(directoryStr))
@@ -41,23 +41,23 @@ namespace Entum
                 }
             }
 
-            string fileNameStr = _outputFileName;
+            string fileNameStr = outputFileName;
             if (fileNameStr == "")
             {
-                //自動設定ファイル名
+                //Automatic configuration file name
                 fileNameStr = string.Format("motion_{0:yyyy_MM_dd_HH_mm_ss}.csv", DateTime.Now);
             }
 
             FileStream fs = new FileStream(directoryStr + fileNameStr, FileMode.Create);
             StreamWriter sw = new StreamWriter(fs);
 
-            foreach (var pose in Poses.Poses)
+            foreach (var pose in humanoidPoses.serializeHumanoidPoses)
             {
                 string seriStr = pose.SerializeCSV();
                 sw.WriteLine(seriStr);
             }
 
-            //ファイルクローズ
+            //File close
             try
             {
                 sw.Close();
@@ -67,7 +67,7 @@ namespace Entum
             }
             catch (Exception e)
             {
-                Debug.LogError("ファイル書き出し失敗！" + e.Message + e.StackTrace);
+                Debug.LogError("File export failed! " + e.Message + e.StackTrace);
             }
 
             if (sw != null)
@@ -84,8 +84,8 @@ namespace Entum
             UnityEditor.AssetDatabase.Refresh();
 #endif
 
-            RecordedTime = 0f;
-            FrameIndex = 0;
+            recordedTime = 0f;
+            frameIndex = 0;
         }
     }
 }

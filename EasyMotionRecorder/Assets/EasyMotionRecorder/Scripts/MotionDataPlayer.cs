@@ -13,63 +13,72 @@ using System;
 namespace Entum
 {
     /// <summary>
-    /// モーションデータ再生クラス
-    /// SpringBone, DynamicBone, BulletPhysicsImplなどの揺れ物アセットのScript Execution Orderを20000など
-    /// 大きな値にしてください。
-    /// DefaultExecutionOrder(11000) はVRIK系より処理順を遅くする、という意図です
+    /// Motion data playback class
+    /// Script Execution Order for shaking objects such as SpringBone, DynamicBone, BulletPhysicsImpl 20000, etc.
+    /// Please make it a large value.
+    /// DefaultExecutionOrder (11000) is intended to slow down the processing order compared to VRIK series.
     /// </summary>
     [DefaultExecutionOrder(11000)]
     public class MotionDataPlayer : MonoBehaviour
     {
-        [SerializeField]
-        private KeyCode _playStartKey = KeyCode.S;
-        [SerializeField]
-        private KeyCode _playStopKey = KeyCode.T;
+        [SerializeField] private KeyCode playStartKey = KeyCode.S;
+        [SerializeField] private KeyCode playStopKey = KeyCode.T;
 
-        [SerializeField]
-        protected HumanoidPoses RecordedMotionData;
-        [SerializeField]
-        private Animator _animator;
+        [SerializeField] protected HumanoidPoses recordedHumanoidPoses;
+        [SerializeField] private Animator animator;
 
-        [SerializeField, Tooltip("再生開始フレームを指定します。0だとファイル先頭から開始です")]
-        private int _startFrame;
-        [SerializeField]
-        private bool _playing;
-        [SerializeField]
-        private int _frameIndex;
 
-        [SerializeField, Tooltip("普段はOBJECTROOTで問題ないです。特殊な機材の場合は変更してください")]
-        private MotionDataSettings.Rootbonesystem _rootBoneSystem = MotionDataSettings.Rootbonesystem.Objectroot;
-        [SerializeField, Tooltip("rootBoneSystemがOBJECTROOTの時は使われないパラメータです。")]
-        private HumanBodyBones _targetRootBone = HumanBodyBones.Hips;
+        [SerializeField, Tooltip("Specify the playback start frame. If it is 0, it starts from the beginning of the file.")]
+        private int startFrame;
 
-        private HumanPoseHandler _poseHandler;
-        private Action _onPlayFinish;
-        private float _playingTime;
+        [SerializeField] private bool playing;
+        [SerializeField] private int frameIndex;
 
-        private void Awake()
+        [SerializeField, Tooltip("Normally, there is no problem with OBJECT ROOT. Please change for special equipment")]
+        private MotionDataSettings.Rootbonesystem rootBoneSystem = MotionDataSettings.Rootbonesystem.Objectroot;
+
+        [SerializeField, Tooltip("This parameter is not used when rootBoneSystem is OBJECTROOT.")]
+        private HumanBodyBones targetRootBone = HumanBodyBones.Hips;
+
+        private HumanPoseHandler humanPoseHandler;
+        private Action OnPlayFinish;
+        private float playingTime;
+
+        private void OnEnable()
         {
-            if (_animator == null)
+            ModelLoader.OnModelChanged += OnModelChanged;
+            OnPlayFinish += StopMotion;
+        }
+
+        private void OnDisable()
+        {
+            ModelLoader.OnModelChanged -= OnModelChanged;
+            OnPlayFinish -= StopMotion;
+        }
+
+        void OnModelChanged(GameObject model)
+        {
+            animator = model.GetComponentInChildren<Animator>();
+
+            if (animator == null)
             {
-                Debug.LogError("MotionDataPlayerにanimatorがセットされていません。MotionDataPlayerを削除します。");
+                Debug.LogError("Animator is not set in MotionDataPlayer. Remove MotionDataPlayer.");
                 Destroy(this);
                 return;
             }
 
-
-            _poseHandler = new HumanPoseHandler(_animator.avatar, _animator.transform);
-            _onPlayFinish += StopMotion;
+            humanPoseHandler = new HumanPoseHandler(animator.avatar, animator.transform);
         }
 
         // Update is called once per frame
         private void Update()
         {
-            if (Input.GetKeyDown(_playStartKey))
+            if (Input.GetKeyDown(playStartKey))
             {
                 PlayMotion();
             }
 
-            if (Input.GetKeyDown(_playStopKey))
+            if (Input.GetKeyDown(playStopKey))
             {
                 StopMotion();
             }
@@ -77,63 +86,61 @@ namespace Entum
 
         private void LateUpdate()
         {
-            if (!_playing)
+            if (!playing)
             {
                 return;
             }
 
-
-            _playingTime += Time.deltaTime;
+            playingTime += Time.deltaTime;
             SetHumanPose();
         }
 
         /// <summary>
-        /// モーションデータ再生開始
+        /// Start motion data playback
         /// </summary>
         private void PlayMotion()
         {
-            if (_playing)
+            if (playing)
             {
                 return;
             }
 
-            if (RecordedMotionData == null)
+            if (recordedHumanoidPoses == null)
             {
-                Debug.LogError("録画済みモーションデータが指定されていません。再生を行いません。");
+                Debug.LogError("Recorded motion data is not specified. Does not play.");
                 return;
             }
 
 
-            _playingTime = _startFrame * (Time.deltaTime / 1f);
-            _frameIndex = _startFrame;
-            _playing = true;
+            playingTime = startFrame * (Time.deltaTime / 1f);
+            frameIndex = startFrame;
+            playing = true;
         }
 
         /// <summary>
-        /// モーションデータ再生終了。フレーム数が最後になっても自動で呼ばれる
+        ///Motion data playback ends. Called automatically even when the number of frames is the last
         /// </summary>
         private void StopMotion()
         {
-            if (!_playing)
+            if (!playing)
             {
                 return;
             }
 
-
-            _playingTime = 0f;
-            _frameIndex = _startFrame;
-            _playing = false;
+            playingTime = 0f;
+            frameIndex = startFrame;
+            playing = false;
         }
 
         private void SetHumanPose()
         {
-            var pose = new HumanPose();
-            pose.muscles = RecordedMotionData.Poses[_frameIndex].Muscles;
-            _poseHandler.SetHumanPose(ref pose);
-            pose.bodyPosition = RecordedMotionData.Poses[_frameIndex].BodyPosition;
-            pose.bodyRotation = RecordedMotionData.Poses[_frameIndex].BodyRotation;
+            var humanPose = new HumanPose();
+            humanPose.muscles = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].muscles;
+            humanPoseHandler.SetHumanPose(ref humanPose);
+            humanPose.bodyPosition = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].bodyPosition;
+            humanPose.bodyRotation = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].bodyRotation;
 
-            switch (_rootBoneSystem)
+            switch (rootBoneSystem)
             {
                 case MotionDataSettings.Rootbonesystem.Objectroot:
                     //_animator.transform.localPosition = RecordedMotionData.Poses[_frameIndex].BodyRootPosition;
@@ -141,28 +148,28 @@ namespace Entum
                     break;
 
                 case MotionDataSettings.Rootbonesystem.Hipbone:
-                    pose.bodyPosition = RecordedMotionData.Poses[_frameIndex].BodyPosition;
-                    pose.bodyRotation = RecordedMotionData.Poses[_frameIndex].BodyRotation;
+                    humanPose.bodyPosition = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].bodyPosition;
+                    humanPose.bodyRotation = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].bodyRotation;
 
-                    _animator.GetBoneTransform(_targetRootBone).position = RecordedMotionData.Poses[_frameIndex].BodyRootPosition;
-                    _animator.GetBoneTransform(_targetRootBone).rotation = RecordedMotionData.Poses[_frameIndex].BodyRootRotation;
+                    animator.GetBoneTransform(targetRootBone).position = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].bodyRootPosition;
+                    animator.GetBoneTransform(targetRootBone).rotation = recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].bodyRootRotation;
                     break;
 
                 default:
                     throw new ArgumentOutOfRangeException();
             }
 
-            //処理落ちしたモーションデータの再生速度調整
-            if (_playingTime > RecordedMotionData.Poses[_frameIndex].Time)
+            //Adjusting the playback speed of motion data that has been processed
+            if (playingTime > recordedHumanoidPoses.serializeHumanoidPoses[frameIndex].time)
             {
-                _frameIndex++;
+                frameIndex++;
             }
 
-            if (_frameIndex == RecordedMotionData.Poses.Count - 1)
+            if (frameIndex == recordedHumanoidPoses.serializeHumanoidPoses.Count - 1)
             {
-                if (_onPlayFinish != null)
+                if (OnPlayFinish != null)
                 {
-                    _onPlayFinish();
+                    OnPlayFinish();
                 }
             }
         }

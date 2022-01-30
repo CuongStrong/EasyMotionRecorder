@@ -18,142 +18,163 @@ using UnityEditor;
 namespace Entum
 {
     /// <summary>
-    /// モーションデータ記録クラス
-    /// スクリプト実行順はVRIKの処理が終わった後の姿勢を取得したいので
-    /// 最大値=32000を指定しています
+    /// Motion data recording class
+    /// As for the script execution order, I want to get the attitude after VRIK processing is finished.
+    /// Maximum value = 32000 is specified
     /// </summary>
     [DefaultExecutionOrder(32000)]
     public class MotionDataRecorder : MonoBehaviour
     {
-        [SerializeField]
-        private KeyCode _recordStartKey = KeyCode.R;
-        [SerializeField]
-        private KeyCode _recordStopKey = KeyCode.X;
+        [SerializeField] private KeyCode recordStartKey = KeyCode.R;
+        [SerializeField] private KeyCode recordStopKey = KeyCode.X;
+        [SerializeField] private Animator animator;
+        [SerializeField] private bool recording;
+        [SerializeField] protected int frameIndex;
 
-        [SerializeField]
-        private Animator _animator;
 
-        [SerializeField]
-        private bool _recording;
-        [SerializeField]
-        protected int FrameIndex;
+        [SerializeField, Tooltip("Normally, there is no problem with OBJECT ROOT. Please change for special equipment")]
+        private MotionDataSettings.Rootbonesystem rootBoneSystem = MotionDataSettings.Rootbonesystem.Objectroot;
 
-        [SerializeField, Tooltip("普段はOBJECTROOTで問題ないです。特殊な機材の場合は変更してください")]
-        private MotionDataSettings.Rootbonesystem _rootBoneSystem = MotionDataSettings.Rootbonesystem.Objectroot;
-        [SerializeField, Tooltip("rootBoneSystemがOBJECTROOTの時は使われないパラメータです。")]
-        private HumanBodyBones _targetRootBone = HumanBodyBones.Hips;
-        [SerializeField]
-        private HumanBodyBones IK_LeftFootBone = HumanBodyBones.LeftFoot;
-        [SerializeField]
-        private HumanBodyBones IK_RightFootBone = HumanBodyBones.RightFoot;
+        [SerializeField, Tooltip("This parameter is not used when rootBoneSystem is OBJECTROOT.")]
+        private HumanBodyBones targetRootBone = HumanBodyBones.Hips;
 
-        protected HumanoidPoses Poses;
-        protected float RecordedTime;
+        [SerializeField] private HumanBodyBones leftFootHumanBodyBones = HumanBodyBones.LeftFoot;
+        [SerializeField] private HumanBodyBones rightFootHumanBodyBones = HumanBodyBones.RightFoot;
 
-        private HumanPose _currentPose;
-        private HumanPoseHandler _poseHandler;
+        public HumanoidPoses humanoidPoses { get; private set; }
+        protected float recordedTime;
+
+        private HumanPose currentHumanPose;
+        private HumanPoseHandler humanPoseHandler;
         public Action OnRecordStart;
         public Action OnRecordEnd;
 
-
-        // Use this for initialization
-        private void Awake()
+        private void OnEnable()
         {
-            if (_animator == null)
+            ModelLoader.OnModelChanged += OnModelChanged;
+        }
+
+        private void OnDisable()
+        {
+            ModelLoader.OnModelChanged -= OnModelChanged;
+        }
+
+        void OnModelChanged(GameObject model)
+        {
+            animator = model.GetComponentInChildren<Animator>();
+
+            if (animator == null)
             {
-                Debug.LogError("MotionDataRecorderにanimatorがセットされていません。MotionDataRecorderを削除します。");
+                Debug.LogError("Animator is not set in MotionDataRecorder. Delete MotionDataRecorder.");
                 Destroy(this);
                 return;
             }
 
-            _poseHandler = new HumanPoseHandler(_animator.avatar, _animator.transform);
+            humanPoseHandler = new HumanPoseHandler(animator.avatar, animator.transform);
         }
 
         private void Update()
         {
-            if (Input.GetKeyDown(_recordStartKey))
+            if (Input.GetKeyDown(recordStartKey))
             {
                 RecordStart();
             }
 
-            if (Input.GetKeyDown(_recordStopKey))
+            if (Input.GetKeyDown(recordStopKey))
             {
                 RecordEnd();
             }
+
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                Debug.Log((DataSave.Instance.clip3 == null) + " ================================================");
+                SetClip(DataSave.Instance.clip3, "Emote_DustOffShoulders_CMF");
+
+
+                // vrmController.SetAnimationController(null);
+            }
+        }
+
+        private void SetClip(AnimationClip animationClip, string state)
+        {
+            AnimatorOverrideController animatorOverrideController = new AnimatorOverrideController(animator.runtimeAnimatorController);
+            // animatorOverrideController.runtimeAnimatorController = animator.runtimeAnimatorController;
+            animatorOverrideController[state] = animationClip;
+            animator.runtimeAnimatorController = animatorOverrideController;
         }
 
         // Update is called once per frame
         private void LateUpdate()
         {
-            if (!_recording)
+            if (!recording)
             {
                 return;
             }
 
+            recordedTime += Time.deltaTime;
 
-            RecordedTime += Time.deltaTime;
-            //現在のフレームのHumanoidの姿勢を取得
-            _poseHandler.GetHumanPose(ref _currentPose);
-            //posesに取得した姿勢を書き込む
-            var serializedPose = new HumanoidPoses.SerializeHumanoidPose();
+            //Get the Humanoid posture of the current frame
+            humanPoseHandler.GetHumanPose(ref currentHumanPose);
 
-            switch (_rootBoneSystem)
+            //Write the acquired posture in poses
+            var serializeHumanoidPose = new HumanoidPoses.SerializeHumanoidPose();
+
+            switch (rootBoneSystem)
             {
                 case MotionDataSettings.Rootbonesystem.Objectroot:
-                    serializedPose.BodyRootPosition = _animator.transform.localPosition;
-                    serializedPose.BodyRootRotation = _animator.transform.localRotation;
+                    serializeHumanoidPose.bodyRootPosition = animator.transform.localPosition;
+                    serializeHumanoidPose.bodyRootRotation = animator.transform.localRotation;
                     break;
 
                 case MotionDataSettings.Rootbonesystem.Hipbone:
-                    serializedPose.BodyRootPosition = _animator.GetBoneTransform(_targetRootBone).position;
-                    serializedPose.BodyRootRotation = _animator.GetBoneTransform(_targetRootBone).rotation;
-                    Debug.LogWarning(_animator.GetBoneTransform(_targetRootBone).position);
+                    serializeHumanoidPose.bodyRootPosition = animator.GetBoneTransform(targetRootBone).position;
+                    serializeHumanoidPose.bodyRootRotation = animator.GetBoneTransform(targetRootBone).rotation;
+                    Debug.LogWarning(animator.GetBoneTransform(targetRootBone).position);
                     break;
 
                 default:
                     throw new ArgumentOutOfRangeException();
             }
-            var bodyTQ = new TQ(_currentPose.bodyPosition, _currentPose.bodyRotation);
-            var LeftFootTQ = new TQ(_animator.GetBoneTransform(IK_LeftFootBone).position, _animator.GetBoneTransform(IK_LeftFootBone).rotation);
-            var RightFootTQ = new TQ(_animator.GetBoneTransform(IK_RightFootBone).position, _animator.GetBoneTransform(IK_RightFootBone).rotation);
-            LeftFootTQ = AvatarUtility.GetIKGoalTQ(_animator.avatar, _animator.humanScale, AvatarIKGoal.LeftFoot, bodyTQ, LeftFootTQ);
-            RightFootTQ = AvatarUtility.GetIKGoalTQ(_animator.avatar, _animator.humanScale, AvatarIKGoal.RightFoot, bodyTQ, RightFootTQ);
 
-            serializedPose.BodyPosition = bodyTQ.t;
-            serializedPose.BodyRotation = bodyTQ.q;
-            serializedPose.LeftfootIK_Pos = LeftFootTQ.t;
-            serializedPose.LeftfootIK_Rot = LeftFootTQ.q;
-            serializedPose.RightfootIK_Pos = RightFootTQ.t;
-            serializedPose.RightfootIK_Rot = RightFootTQ.q;
+            var bodyTQ = new TQ(currentHumanPose.bodyPosition, currentHumanPose.bodyRotation);
+            var leftFootTQ = new TQ(animator.GetBoneTransform(leftFootHumanBodyBones).position, animator.GetBoneTransform(leftFootHumanBodyBones).rotation);
+            var rightFootTQ = new TQ(animator.GetBoneTransform(rightFootHumanBodyBones).position, animator.GetBoneTransform(rightFootHumanBodyBones).rotation);
+            leftFootTQ = AvatarUtility.GetIKGoalTQ(animator.avatar, animator.humanScale, AvatarIKGoal.LeftFoot, bodyTQ, leftFootTQ);
+            rightFootTQ = AvatarUtility.GetIKGoalTQ(animator.avatar, animator.humanScale, AvatarIKGoal.RightFoot, bodyTQ, rightFootTQ);
 
+            serializeHumanoidPose.bodyPosition = bodyTQ.t;
+            serializeHumanoidPose.bodyRotation = bodyTQ.q;
+            serializeHumanoidPose.leftFootIKPos = leftFootTQ.t;
+            serializeHumanoidPose.leftFootIKRot = leftFootTQ.q;
+            serializeHumanoidPose.rightfootIKPos = rightFootTQ.t;
+            serializeHumanoidPose.rightfootIKRot = rightFootTQ.q;
 
+            serializeHumanoidPose.frameCount = frameIndex;
+            serializeHumanoidPose.muscles = new float[currentHumanPose.muscles.Length];
+            serializeHumanoidPose.time = recordedTime;
 
-            serializedPose.FrameCount = FrameIndex;
-            serializedPose.Muscles = new float[_currentPose.muscles.Length];
-            serializedPose.Time = RecordedTime;
-            for (int i = 0; i < serializedPose.Muscles.Length; i++)
+            for (int i = 0; i < serializeHumanoidPose.muscles.Length; i++)
             {
-                serializedPose.Muscles[i] = _currentPose.muscles[i];
+                serializeHumanoidPose.muscles[i] = currentHumanPose.muscles[i];
             }
 
-            SetHumanBoneTransformToHumanoidPoses(_animator, ref serializedPose);
+            SetHumanBoneTransformToHumanoidPoses(animator, ref serializeHumanoidPose);
 
-            Poses.Poses.Add(serializedPose);
-            FrameIndex++;
+            humanoidPoses.serializeHumanoidPoses.Add(serializeHumanoidPose);
+            frameIndex++;
         }
 
         /// <summary>
-        /// 録画開始
+        ///Start recording
         /// </summary>
         private void RecordStart()
         {
-            if (_recording)
+            if (recording)
             {
                 return;
             }
 
-
-            Poses = ScriptableObject.CreateInstance<HumanoidPoses>();
+            humanoidPoses = ScriptableObject.CreateInstance<HumanoidPoses>();
 
             if (OnRecordStart != null)
             {
@@ -161,17 +182,17 @@ namespace Entum
             }
 
             OnRecordEnd += WriteAnimationFile;
-            _recording = true;
-            RecordedTime = 0f;
-            FrameIndex = 0;
+            recording = true;
+            recordedTime = 0f;
+            frameIndex = 0;
         }
 
         /// <summary>
-        /// 録画終了
+        /// Recording end
         /// </summary>
         private void RecordEnd()
         {
-            if (!_recording)
+            if (!recording)
             {
                 return;
             }
@@ -183,7 +204,7 @@ namespace Entum
             }
 
             OnRecordEnd -= WriteAnimationFile;
-            _recording = false;
+            recording = false;
         }
 
         private static void SetHumanBoneTransformToHumanoidPoses(Animator animator, ref HumanoidPoses.SerializeHumanoidPose pose)
@@ -201,7 +222,7 @@ namespace Entum
                 {
                     var bone = new HumanoidPoses.SerializeHumanoidPose.HumanoidBone();
                     bone.Set(animator.transform, t);
-                    pose.HumanoidBones.Add(bone);
+                    pose.humanoidBones.Add(bone);
                 }
             }
         }
@@ -211,28 +232,30 @@ namespace Entum
 #if UNITY_EDITOR
             SafeCreateDirectory("Assets/Resources");
 
-            var path = string.Format("Assets/Resources/RecordMotion_{0}{1:yyyy_MM_dd_HH_mm_ss}.asset", _animator.name, DateTime.Now);
+            var path = string.Format("Assets/Resources/RecordMotion_{0}{1:yyyy_MM_dd_HH_mm_ss}.asset", animator.name, DateTime.Now);
             var uniqueAssetPath = AssetDatabase.GenerateUniqueAssetPath(path);
 
-            AssetDatabase.CreateAsset(Poses, uniqueAssetPath);
+            AssetDatabase.CreateAsset(humanoidPoses, uniqueAssetPath);
             AssetDatabase.Refresh();
 
-            RecordedTime = 0f;
-            FrameIndex = 0;
+            recordedTime = 0f;
+            frameIndex = 0;
 #endif
+
+            humanoidPoses.ExportHumanoidAnimRuntime();
         }
 
         /// <summary>
-        /// 指定したパスにディレクトリが存在しない場合
-        /// すべてのディレクトリとサブディレクトリを作成します
+        /// If the directory does not exist in the specified path
+        /// Create all directories and subdirectories
         /// </summary>
         public static DirectoryInfo SafeCreateDirectory(string path)
         {
             return Directory.Exists(path) ? null : Directory.CreateDirectory(path);
         }
-        public Animator CharacterAnimator
+        public Animator characterAnimator
         {
-            get { return _animator; }
+            get { return animator; }
         }
 
         public class TQ

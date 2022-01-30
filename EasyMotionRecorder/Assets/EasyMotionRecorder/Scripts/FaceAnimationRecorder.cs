@@ -18,44 +18,56 @@ http://opensource.org/licenses/mit-license.php
 namespace Entum
 {
     /// <summary>
-    /// Blendshapeの動きを記録するクラス
-    /// リップシンクは後入れでTimeline上にAudioClipをつけて、みたいな可能性が高いので
-    /// Exclusive(除外)するBlendshape名を登録できるようにしています。
+    /// A class that records the movement of Blendshape
+    /// Since there is a high possibility that lip sync will be added later and AudioClip will be added on the Timeline.
+    /// It is possible to register the Blendshape name to be exclusive.
     /// </summary>
     [RequireComponent(typeof(MotionDataRecorder))]
     public class FaceAnimationRecorder : MonoBehaviour
     {
-        [Header("表情記録を同時に行う場合はtrueにします")] [SerializeField]
-        private bool _recordFaceBlendshapes = false;
+        [Header("Set to true if you want to record facial expressions at the same time.")]
+        [SerializeField] private bool recordFaceBlendshapes = false;
 
-        [Header("リップシンクを記録したくない場合はここにモーフ名を入れていく 例:face_mouse_eなど")] [SerializeField]
-        private List<string> _exclusiveBlendshapeNames;
+        [Header("If you don't want to record lip sync, put the morph name here Example: face_mouse_e etc.")]
+        [SerializeField] private List<string> exclusiveBlendshapeNames;
 
-        private MotionDataRecorder _animRecorder;
+        private MotionDataRecorder motionDataRecorder;
+        private SkinnedMeshRenderer[] skinnedMeshRenderers;
+
+        private CharacterFacialData characterFacialData = null;
+
+        private bool recording = false;
+        private int frameCount = 0;
+        private CharacterFacialData.SerializeHumanoidFace pastSerializeHumanoidFace = new CharacterFacialData.SerializeHumanoidFace();
+        private float recordedTime = 0f;
 
 
-        private SkinnedMeshRenderer[] _smeshs;
+        /// <summary>
+        /// Start is called on the frame when a script is enabled just before
+        /// any of the Update methods is called the first time.
+        /// </summary>
+        // IEnumerator Start()
+        // {
+        //     yield return new WaitForSeconds(2);
 
-        private CharacterFacialData _facialData = null;
+        //     Debug.Log("================================= DataSave.Instance.clips.Count: " + DataSave.Instance.clips2.Count);
+        // }
 
-        private bool _recording = false;
-
-        private int _frameCount = 0;
-
-
-        CharacterFacialData.SerializeHumanoidFace _past = new CharacterFacialData.SerializeHumanoidFace();
-
-        private float _recordedTime = 0f;
-
-        // Use this for initialization
         private void OnEnable()
         {
-            _animRecorder = GetComponent<MotionDataRecorder>();
-            _animRecorder.OnRecordStart += RecordStart;
-            _animRecorder.OnRecordEnd += RecordEnd;
-            if (_animRecorder.CharacterAnimator != null)
+            ModelLoader.OnModelChanged += OnModelChanged;
+
+            motionDataRecorder = GetComponent<MotionDataRecorder>();
+            motionDataRecorder.OnRecordStart += RecordStart;
+            motionDataRecorder.OnRecordEnd += RecordEnd;
+        }
+
+        void OnModelChanged(GameObject model)
+        {
+            skinnedMeshRenderers = GetSkinnedMeshRenderers(model.GetComponentInChildren<Animator>());
+            if (skinnedMeshRenderers == null)
             {
-                _smeshs = GetSkinnedMeshRenderers(_animRecorder.CharacterAnimator);
+                Debug.LogError("Missing skinnedMeshRenderers");
             }
         }
 
@@ -79,59 +91,63 @@ namespace Entum
 
         private void OnDisable()
         {
-            if (_recording)
+            if (recording)
             {
                 RecordEnd();
-                _recording = false;
+                recording = false;
             }
 
-            if (_animRecorder == null) return;
-            _animRecorder.OnRecordStart -= RecordStart;
-            _animRecorder.OnRecordEnd -= RecordEnd;
+            ModelLoader.OnModelChanged -= OnModelChanged;
+
+            if (motionDataRecorder != null)
+            {
+                motionDataRecorder.OnRecordStart -= RecordStart;
+                motionDataRecorder.OnRecordEnd -= RecordEnd;
+            }
         }
 
         /// <summary>
-        /// 記録開始
+        /// Start recording
         /// </summary>
         private void RecordStart()
         {
-            if (_recordFaceBlendshapes == false)
+            if (recordFaceBlendshapes == false)
             {
                 return;
             }
 
-            if (_recording)
+            if (recording)
             {
                 return;
             }
 
-            if (_smeshs.Length == 0)
+            if (skinnedMeshRenderers.Length == 0)
             {
-                Debug.LogError("顔のメッシュ指定がされていないので顔のアニメーションは記録しません");
+                Debug.LogError("No face animation is recorded because the face mesh is not specified.");
                 return;
             }
 
             Debug.Log("FaceAnimationRecorder record start");
-            _recording = true;
-            _recordedTime = 0f;
-            _frameCount = 0;
-            _facialData = ScriptableObject.CreateInstance<CharacterFacialData>();
+            recording = true;
+            recordedTime = 0f;
+            frameCount = 0;
+            characterFacialData = ScriptableObject.CreateInstance<CharacterFacialData>();
         }
 
         /// <summary>
-        /// 記録終了
+        /// End of recording
         /// </summary>
         private void RecordEnd()
         {
-            if (_recordFaceBlendshapes == false)
+            if (recordFaceBlendshapes == false)
             {
                 return;
             }
 
-            if (_smeshs.Length == 0)
+            if (skinnedMeshRenderers.Length == 0)
             {
-                Debug.LogError("顔のメッシュ指定がされていないので顔のアニメーションは記録しませんでした");
-                if (_recording == true)
+                Debug.LogError("I didn't record the face animation because the face mesh wasn't specified.");
+                if (recording == true)
                 {
                     Debug.LogAssertion("Unexpected execution!!!!");
                 }
@@ -139,42 +155,49 @@ namespace Entum
             else
             {
                 //WriteAnimationFileToScriptableObject();
-                ExportFacialAnimationClip(_animRecorder.CharacterAnimator, _facialData);
+                // ExportFacialAnimationClip(motionDataRecorder.characterAnimator, motionDataRecorder.humanoidPoses.clip, characterFacialData);
             }
 
             Debug.Log("FaceAnimationRecorder record end");
 
-            _recording = false;
+            recording = false;
+        }
+
+        public void ExportFacialAnimationClip()
+        {
+            ExportFacialAnimationClip(motionDataRecorder.characterAnimator, motionDataRecorder.humanoidPoses.clip, characterFacialData);
         }
 
 
         private void WriteAnimationFileToScriptableObject()
         {
+#if UNITY_EDITOR
             MotionDataRecorder.SafeCreateDirectory("Assets/Resources");
 
             string path = AssetDatabase.GenerateUniqueAssetPath(
-                "Assets/Resources/RecordMotion_ face" + _animRecorder.CharacterAnimator.name +
+                "Assets/Resources/RecordMotion_ face" + motionDataRecorder.characterAnimator.name +
                 DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss") +
                 ".asset");
 
-            if (_facialData == null)
+            if (characterFacialData == null)
             {
                 Debug.LogError("記録されたFaceデータがnull");
             }
             else
             {
-                AssetDatabase.CreateAsset(_facialData, path);
+                AssetDatabase.CreateAsset(characterFacialData, path);
                 AssetDatabase.Refresh();
             }
 
-            _recordedTime = 0f;
-            _frameCount = 0;
+            recordedTime = 0f;
+            frameCount = 0;
+#endif
         }
 
-        //フレーム内の差分が無いかをチェックするやつ。
+        //The one that checks if there is a difference in the frame.
         private bool IsSame(CharacterFacialData.SerializeHumanoidFace a, CharacterFacialData.SerializeHumanoidFace b)
         {
-            if (a == null || b == null || a.Smeshes.Count == 0 || b.Smeshes.Count == 0)
+            if (a == null || b == null || a.smeshes.Count == 0 || b.smeshes.Count == 0)
             {
                 return false;
             }
@@ -184,8 +207,8 @@ namespace Entum
                 return false;
             }
 
-            return !a.Smeshes.Where((t1, i) =>
-                t1.blendShapes.Where((t, j) => Mathf.Abs(t - b.Smeshes[i].blendShapes[j]) > 1).Any()).Any();
+            return !a.smeshes.Where((t1, i) =>
+                t1.blendShapes.Where((t, j) => Mathf.Abs(t - b.smeshes[i].blendShapes[j]) > 1).Any()).Any();
         }
 
         private void LateUpdate()
@@ -195,27 +218,27 @@ namespace Entum
                 ExportFacialAnimationClipTest();
             }
 
-            if (!_recording)
+            if (!recording)
             {
                 return;
             }
 
-            _recordedTime += Time.deltaTime;
+            recordedTime += Time.deltaTime;
 
-            var p = new CharacterFacialData.SerializeHumanoidFace();
-            for (int i = 0; i < _smeshs.Length; i++)
+            var serializeHumanoidFace = new CharacterFacialData.SerializeHumanoidFace();
+            for (int i = 0; i < skinnedMeshRenderers.Length; i++)
             {
-                var mesh = new CharacterFacialData.SerializeHumanoidFace.MeshAndBlendshape();
-                mesh.path = _smeshs[i].name;
-                mesh.blendShapes = new float[_smeshs[i].sharedMesh.blendShapeCount];
+                var meshAndBlendshape = new CharacterFacialData.SerializeHumanoidFace.MeshAndBlendshape();
+                meshAndBlendshape.path = skinnedMeshRenderers[i].name;
+                meshAndBlendshape.blendShapes = new float[skinnedMeshRenderers[i].sharedMesh.blendShapeCount];
 
-                for (int j = 0; j < _smeshs[i].sharedMesh.blendShapeCount; j++)
+                for (int j = 0; j < skinnedMeshRenderers[i].sharedMesh.blendShapeCount; j++)
                 {
-                    var tname = _smeshs[i].sharedMesh.GetBlendShapeName(j);
+                    var tname = skinnedMeshRenderers[i].sharedMesh.GetBlendShapeName(j);
 
                     var useThis = true;
 
-                    foreach (var item in _exclusiveBlendshapeNames)
+                    foreach (var item in exclusiveBlendshapeNames)
                     {
                         if (item.IndexOf(tname, StringComparison.Ordinal) >= 0)
                         {
@@ -223,128 +246,132 @@ namespace Entum
                         }
                     }
 
-
                     if (useThis)
                     {
-                        mesh.blendShapes[j] = _smeshs[i].GetBlendShapeWeight(j);
+                        meshAndBlendshape.blendShapes[j] = skinnedMeshRenderers[i].GetBlendShapeWeight(j);
                     }
                 }
 
-                p.Smeshes.Add(mesh);
+                serializeHumanoidFace.smeshes.Add(meshAndBlendshape);
             }
 
-            if (!IsSame(p, _past))
+            if (!IsSame(serializeHumanoidFace, pastSerializeHumanoidFace))
             {
-                p.FrameCount = _frameCount;
-                p.Time = _recordedTime;
+                serializeHumanoidFace.frameCount = frameCount;
+                serializeHumanoidFace.time = recordedTime;
 
-                _facialData.Facials.Add(p);
-                _past = new CharacterFacialData.SerializeHumanoidFace(p);
+                characterFacialData.facials.Add(serializeHumanoidFace);
+                pastSerializeHumanoidFace = new CharacterFacialData.SerializeHumanoidFace(serializeHumanoidFace);
             }
 
-            _frameCount++;
+            frameCount++;
         }
 
 
         /// <summary>
-        /// Animatorと記録したデータで書き込む
+        /// Write with the recorded data as Animator
         /// </summary>
         /// <param name="root"></param>
         /// <param name="facial"></param>
-        void ExportFacialAnimationClip(Animator root, CharacterFacialData facial)
+        void ExportFacialAnimationClip(Animator root, AnimationClip animclip, CharacterFacialData facial)
         {
-            var animclip = new AnimationClip();
+#if UNITY_EDITOR
+            if (animclip == null)
+                animclip = new AnimationClip();
 
-            var mesh = _smeshs;
-
-            for (int faceTargetMeshIndex = 0; faceTargetMeshIndex < mesh.Length; faceTargetMeshIndex++)
+            for (int i = 0; i < skinnedMeshRenderers.Length; i++)
             {
-                var pathsb = new StringBuilder().Append(mesh[faceTargetMeshIndex].transform.name);
-                var trans = mesh[faceTargetMeshIndex].transform;
+                var pathsb = new StringBuilder().Append(skinnedMeshRenderers[i].transform.name);
+                var trans = skinnedMeshRenderers[i].transform;
+
                 while (trans.parent != null && trans.parent != root.transform)
                 {
                     trans = trans.parent;
                     pathsb.Insert(0, "/").Insert(0, trans.name);
                 }
 
-                //pathにはBlendshapeのベース名が入る
-                //U_CHAR_1:SkinnedMeshRendererみたいなもの
+                //The path contains the base name of the Blend shape
+                //U_CHAR_1: Something like SkinnedMeshRenderer
                 var path = pathsb.ToString();
 
-                //個別メッシュの個別Blendshapeごとに、AnimationCurveを生成している
-                for (var blendShapeIndex = 0;
-                    blendShapeIndex < mesh[faceTargetMeshIndex].sharedMesh.blendShapeCount;
-                    blendShapeIndex++)
+                //An Animation Curve is generated for each individual Blend shape of the individual mesh.
+                for (var j = 0; j < skinnedMeshRenderers[i].sharedMesh.blendShapeCount; j++)
                 {
-                    var curveBinding = new EditorCurveBinding();
-                    curveBinding.type = typeof(SkinnedMeshRenderer);
-                    curveBinding.path = path;
-                    curveBinding.propertyName = "blendShape." +
-                                                mesh[faceTargetMeshIndex].sharedMesh.GetBlendShapeName(blendShapeIndex);
+                    // var curveBinding = new EditorCurveBinding();
+                    // curveBinding.type = typeof(SkinnedMeshRenderer);
+                    // curveBinding.path = path;
+                    // curveBinding.propertyName = "blendShape." + skinnedMeshRenderers[i].sharedMesh.GetBlendShapeName(j);
                     AnimationCurve curve = new AnimationCurve();
 
                     float pastBlendshapeWeight = -1;
-                    for (int k = 0; k < _facialData.Facials.Count; k++)
+                    for (int k = 0; k < characterFacialData.facials.Count; k++)
                     {
                         float time = 0;
                         if (k > 0)
                         {
-                            time = facial.Facials[k - 1].Time;
+                            time = facial.facials[k - 1].time;
                         }
 
-                        for (float ind = time; ind < facial.Facials[k].Time; ind += 0.1f)
+                        for (float ind = time; ind < facial.facials[k].time; ind += 0.1f)
                         {
                             if (k > 0)
                             {
                                 curve.AddKey(ind,
-                                    _facialData.Facials[k - 1].Smeshes[faceTargetMeshIndex]
-                                        .blendShapes[blendShapeIndex]);
+                                    characterFacialData.facials[k - 1].smeshes[i]
+                                        .blendShapes[j]);
                             }
                             else
                             {
                                 curve.AddKey(ind,
-                                    _facialData.Facials[0].Smeshes[faceTargetMeshIndex].blendShapes[blendShapeIndex]);
+                                    characterFacialData.facials[0].smeshes[i].blendShapes[j]);
                             }
                         }
 
-                        curve.AddKey(facial.Facials[k].Time,
-                            _facialData.Facials[k].Smeshes[faceTargetMeshIndex].blendShapes[blendShapeIndex]);
+                        curve.AddKey(facial.facials[k].time,
+                            characterFacialData.facials[k].smeshes[i].blendShapes[j]);
 
                     }
 
 
-                    AnimationUtility.SetEditorCurve(animclip, curveBinding, curve);
+                    // AnimationUtility.SetEditorCurve(animclip, curveBinding, curve);
+                    animclip.SetCurve(path, typeof(SkinnedMeshRenderer), "blendShape." + skinnedMeshRenderers[i].sharedMesh.GetBlendShapeName(j), curve);
                 }
             }
 
             MotionDataRecorder.SafeCreateDirectory("Assets/Resources");
 
-            var outputPath = "Assets/Resources/FaceRecordMotion_" + _animRecorder.CharacterAnimator.name + "_" +
+            var outputPath = "Assets/Resources/FaceRecordMotion_" + motionDataRecorder.characterAnimator.name + "_" +
                              DateTime.Now.ToString("yyyy_MM_dd_HH_mm_ss") + "_Clip.anim";
 
             Debug.Log("outputPath:" + outputPath);
-            AssetDatabase.CreateAsset(animclip,
-                AssetDatabase.GenerateUniqueAssetPath(outputPath));
+            AssetDatabase.CreateAsset(animclip, AssetDatabase.GenerateUniqueAssetPath(outputPath));
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+
+            // DataSave.Instance.clip3 = animclip;//.Add(animclip);
+            // SaveGameManager.Instance.Save();
+
+            // Debug.Log("================================= DataSave.Instance.clips.Count: " + DataSave.Instance.clips2.Count);
+#endif
         }
 
         /// <summary>
-        /// Animatorと記録したデータで書き込むテスト
+        /// Animator and a test to write with recorded data
         /// </summary>
         /// <param name="root"></param>
         /// <param name="facial"></param>
         void ExportFacialAnimationClipTest()
         {
+#if UNITY_EDITOR
             var animclip = new AnimationClip();
 
-            var mesh = _smeshs;
+            var mesh = skinnedMeshRenderers;
 
             for (int i = 0; i < mesh.Length; i++)
             {
                 var pathsb = new StringBuilder().Append(mesh[i].transform.name);
                 var trans = mesh[i].transform;
-                while (trans.parent != null && trans.parent != _animRecorder.CharacterAnimator.transform)
+                while (trans.parent != null && trans.parent != motionDataRecorder.characterAnimator.transform)
                 {
                     trans = trans.parent;
                     pathsb.Insert(0, "/").Insert(0, trans.name);
@@ -361,7 +388,7 @@ namespace Entum
                     AnimationCurve curve = new AnimationCurve();
 
 
-                    //全てのBlendshapeに対して0→100→0の遷移でキーを打つ
+                    //Hit the key in the transition of 0 → 100 → 0 for all Blend shapes
                     curve.AddKey(0, 0);
                     curve.AddKey(1, 100);
                     curve.AddKey(2, 0);
@@ -373,10 +400,12 @@ namespace Entum
             }
 
             AssetDatabase.CreateAsset(animclip,
-                AssetDatabase.GenerateUniqueAssetPath("Assets/" + _animRecorder.CharacterAnimator.name +
+                AssetDatabase.GenerateUniqueAssetPath("Assets/" + motionDataRecorder.characterAnimator.name +
                                                       "_facial_ClipTest.anim"));
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+#endif
+
         }
     }
 }
